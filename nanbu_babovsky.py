@@ -1,0 +1,1 @@
+def Nanbu_Babovsky_2D_Periodic(N, dt, n_tot, e , mu, alpha, Lx, Ly, num_cells, S,dx):
