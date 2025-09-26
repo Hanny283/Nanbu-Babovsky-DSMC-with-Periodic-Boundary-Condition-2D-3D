@@ -73,25 +73,29 @@ def assign_positions_2d(N, Lx, Ly):
     positions = np.column_stack((positions_x, positions_y))
     return positions
 
-def assign_positions_3d(velocities, Lx, Ly, Lz):
+def assign_positions_3d(N, Lx, Ly, Lz):
     """
-    Assign positions to particles on a 1-dimensional spatial domain.
+    Assign positions to particles on a 3-dimensional spatial domain.
 
     Parameters
     ----------
-    velocities : numpy array of particles velocities
-    L: float 
-    The length of the spatial domain
+    N : int
+        Number of particles
+    Lx : float 
+        The length of the x spatial domain
+    Ly : float 
+        The length of the y spatial domain
+    Lz : float 
+        The length of the z spatial domain
 
     Returns
     -------
-    positions : numpy array of shape (N, 2)
+    positions : numpy array of shape (N, 3)
         The positions of the particles.
     """
-    num_particles = len(velocities)
-    positions = np.random.uniform(0, Lx, num_particles)
-    positions = np.random.uniform(0, Ly, num_particles)
-    positions = np.random.uniform(0, Lz, num_particles)
+    positions_x = np.random.uniform(0, Lx, N)
+    positions_y = np.random.uniform(0, Ly, N)
+    positions_z = np.random.uniform(0, Lz, N)
     positions = np.column_stack((positions_x, positions_y, positions_z))
     return positions
 
@@ -126,7 +130,7 @@ def collide_particles_2d(velocities, indices_i, indices_j):
 
 def collide_particles_3d(velocities, indices_i, indices_j):
     """
-    Collides M particles with velocities given by the arraysv_i and v_j.
+    Collides M particles with velocities given by the arrays v_i and v_j.
 
     Parameters
     ----------
@@ -246,6 +250,16 @@ def pair_particle_indices_2d(sampled_indices):
     # group into consecutive pairs
     return np.array([[shuffled[i], shuffled[i+1]] for i in range(0, len(shuffled), 2)])
 
+def pair_particle_indices_3d(sampled_indices):
+    """
+    input: list of particle indices in a cell, returns pairs for collision
+    """
+    shuffled = sampled_indices[:]           # copy so original isn't changed
+    np.random.shuffle(shuffled)   # shuffle order
+
+    # group into consecutive pairs
+    return np.array([[shuffled[i], shuffled[i+1]] for i in range(0, len(shuffled), 2)])
+
 def update_positions_2d(positions, velocities, dt):
     """
     Update particle positions using velocities and time step.
@@ -263,6 +277,13 @@ def update_positions_2d(positions, velocities, dt):
     -------
     positions : numpy array of shape (N, 2)
         Updated particle positions
+    """
+    positions = positions + velocities * dt
+    return positions
+
+def update_positions_3d(positions, velocities, dt):
+    """
+    Update particle positions using velocities and time step.
     """
     positions = positions + velocities * dt
     return positions
