@@ -73,6 +73,15 @@ def assign_positions_2d(N, Lx, Ly):
     positions = np.column_stack((positions_x, positions_y))
     return positions
 
+def assign_positions_circular(N, R):
+    """
+    Assign positions to particles on a circular domain.
+    """
+    positions_x = R * np.cos(2 * np.pi * np.random.rand(N))
+    positions_y = R * np.sin(2 * np.pi * np.random.rand(N))
+    positions = np.column_stack((positions_x, positions_y))
+    return positions
+
 def assign_positions_3d(N, Lx, Ly, Lz):
     """
     Assign positions to particles on a 3-dimensional spatial domain.
@@ -98,6 +107,17 @@ def assign_positions_3d(N, Lx, Ly, Lz):
     positions_z = np.random.uniform(0, Lz, N)
     positions = np.column_stack((positions_x, positions_y, positions_z))
     return positions
+
+def assign_positions_circular(N, R):
+    """
+    Assign positions to particles on a circular domain.
+    """
+    positions_x = R * np.cos(2 * np.pi * np.random.rand(N))
+    positions_y = R * np.sin(2 * np.pi * np.random.rand(N))
+    positions = np.column_stack((positions_x, positions_y))
+    return positions
+
+
 
 def collide_particles_2d(velocities, indices_i, indices_j):
     """
