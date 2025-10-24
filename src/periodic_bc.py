@@ -205,6 +205,14 @@ def reflecting_BC_spherical(velocities, positions, R):
 
     return velocities, positions
 
+def reflecting_BC_arbitrary(velocities, positions, mesh):
+
+    
+
+
+
+    return velocities, positions
+
 def maxwell_bc_2d(positions, velocities, Lx, Ly, alpha, T_x0, T_y0, rng=np.random):
     x, y = positions[:,0], positions[:,1]
     vx, vy = velocities[:,0], velocities[:,1]
