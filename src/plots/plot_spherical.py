@@ -11,7 +11,7 @@ from sims.Spherical_Boundary import Spherical_Boundary
 
 def main():
     # Parameters (mirroring styles used in plot_circular.py)
-    N = 10000  # Reduced for 3D visualization performance
+    N = 1000  # Reduced for 3D visualization performance
     dt = 0.01
     n_tot = 50  # Reduced for faster execution
     e = 1.0

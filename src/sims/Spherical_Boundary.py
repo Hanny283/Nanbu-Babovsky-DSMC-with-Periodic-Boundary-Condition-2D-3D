@@ -1,4 +1,7 @@
 import numpy as np
+import sys
+import os
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 import helpers as hf
 import periodic_bc as pb
 
@@ -120,8 +123,14 @@ class cell_tetrahedron:
     
     
 def Spherical_Boundary(N, R, positions, radius, T_x0, T_y0, T_z0, dt, n_tot, e, mu, alpha, buckets_x, buckets_y, buckets_z):
+    print("Starting spherical boundary simulation...")
+    print(f"Parameters: N={N}, R={R}, n_tot={n_tot}")
+    
     positions = hf.assign_positions_spherical(N, R)
+    print("Generated initial positions")
+    
     velocities = hf.sample_velocities_from_maxwellian_3d(T_x0, T_y0, T_z0, N)
+    print("Generated initial velocities")
 
     cell_width = radius / buckets_x
     cell_height = radius / buckets_y
@@ -130,12 +139,33 @@ def Spherical_Boundary(N, R, positions, radius, T_x0, T_y0, T_z0, dt, n_tot, e, 
     bucket_dict = {(i, j, k): set() for i in range(buckets_x) for j in range(buckets_y) for k in range(buckets_z)}
     
     # Generate mesh - use pygmsh if available, otherwise create simple mesh
+    print("Generating mesh...")
     if HAS_PYGMSH:
+        print("Using pygmsh for mesh generation")
         with pygmsh.geo.Geometry() as geom:
-            sphere = geom.add_sphere([0.0, 0.0, 0.0], radius=1.0, mesh_size=0.1)
+            sphere = geom.add_ball([0.0, 0.0, 0.0], radius=1.0, mesh_size=0.1)
             mesh = geom.generate_mesh()
-        tet_conn = mesh.get_cells_type("tetrahedron")
+        
+        # Check what cell types are available
+        print("Available cell types:", list(mesh.cells_dict.keys()))
+        
+        # Try to get tetrahedra, fall back to other cell types if not available
+        if "tetra" in mesh.cells_dict:
+            tet_conn = mesh.get_cells_type("tetra")
+            print(f"Found {len(tet_conn)} tetrahedra")
+        elif "tetrahedron" in mesh.cells_dict:
+            tet_conn = mesh.get_cells_type("tetrahedron")
+            print(f"Found {len(tet_conn)} tetrahedra")
+        elif "triangle" in mesh.cells_dict:
+            # If only triangles available, we need to create a simple tetrahedral mesh
+            print("Warning: Only triangles available, creating simple tetrahedral mesh")
+            tet_conn = []
+        else:
+            print("Warning: No suitable cell types found, creating simple mesh")
+            tet_conn = []
+        
         pts3d = mesh.points[:, :3]
+        print(f"Generated {len(pts3d)} mesh points")
     else:
         # Create a simple cubic mesh as fallback
         n_cells_per_dim = 4  # Simple 4x4x4 grid

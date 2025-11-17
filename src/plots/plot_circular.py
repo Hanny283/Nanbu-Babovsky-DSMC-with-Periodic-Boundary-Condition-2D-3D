@@ -3,6 +3,9 @@ import matplotlib.pyplot as plt
 import matplotlib.tri as mtri
 import pygmsh
 
+import sys
+import os
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'sims'))
 from Circular_Boundary import Circular_Boundary
 
 
@@ -50,7 +53,7 @@ def build_disk_triangulation(radius: float, num_radial: int = 20, num_angular: i
 
 def main():
     # Parameters (mirroring styles used in main.py)
-    N = 100000
+    N = 1000
     dt = 0.01
     n_tot = 100
     e = 1.0

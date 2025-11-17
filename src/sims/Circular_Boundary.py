@@ -1,4 +1,7 @@
 import numpy as np
+import sys
+import os
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 import helpers as hf
 import periodic_bc as pb
 import pygmsh
@@ -143,7 +146,10 @@ def Circular_Boundary(N, R, positions, radius, T_x0, T_y0, dt, n_tot, e, mu, alp
 
     for bucket in bucket_dict:
         for cell in cells:
-            if cell.bounding_box[0] <= bucket[0] * cell_width and cell.bounding_box[1] >= bucket[0] * cell_width and cell.bounding_box[2] <= bucket[1] * cell_height and cell.bounding_box[3] >= bucket[1] * cell_height:
+            if (cell.bounding_box[0] < bucket[0] * cell_width + cell_width and 
+                cell.bounding_box[1] > bucket[0] * cell_width and 
+                cell.bounding_box[2] < bucket[1] * cell_height + cell_height and 
+                cell.bounding_box[3] > bucket[1] * cell_height):
                 bucket_dict[bucket].add(cell)
                 break
 
