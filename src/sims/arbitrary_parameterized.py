@@ -146,6 +146,7 @@ def create_mesh_from_star_shape(pts):
 def create_cell_list_and_adjacency_list(mesh):
     """
     Create an adjacency dictionary for all triangle cells in the mesh.
+    Optimized version using edge-based lookup for O(N) complexity instead of O(N^2).
     
     Parameters
     ----------
@@ -162,35 +163,42 @@ def create_cell_list_and_adjacency_list(mesh):
     tri_conn = mesh.get_cells_type("triangle")
     pts2d = mesh.points[:, :2]  # Extract 2D coordinates
     
+    print(f"    Creating {len(tri_conn)} cell objects...", flush=True)
     # Create cell_triangle objects for each triangle
     cells = []
     for tri in tri_conn:
         verts = pts2d[tri][:, :2]   # shape (3, 2): the triangle's three (x,y) vertices
         cells.append(cell_triangle(verts))
     
-    # Create adjacency dictionary
-    adjacency_dict = {}
+    print(f"    Building adjacency dictionary (optimized algorithm)...", flush=True)
+    # Create adjacency dictionary using edge-based lookup (much faster than O(N^2))
+    adjacency_dict = {cell: [] for cell in cells}
     
-    # For each cell, find adjacent cells (cells that share exactly 2 vertices)
-    for i, cell in enumerate(cells):
-        adjacent_cells = []
-        # Get vertex indices for current triangle
-        tri_i_vertices = set(tri_conn[i])
-        
-        # Check all other cells
-        for j, other_cell in enumerate(cells):
-            if i != j:  # Don't compare with itself
-                # Get vertex indices for other triangle
-                tri_j_vertices = set(tri_conn[j])
-                
-                # Check if they share exactly 2 vertices
-                shared_vertices = tri_i_vertices & tri_j_vertices
-                if len(shared_vertices) == 2:
-                    adjacent_cells.append(other_cell)
-        
-        # Map cell to its list of adjacent cells
-        adjacency_dict[cell] = adjacent_cells
+    # Build edge-to-cells mapping: each edge (as sorted tuple) maps to list of cells containing it
+    edge_to_cells = {}
+    for i, tri in enumerate(tri_conn):
+        # Get all 3 edges of the triangle (each edge is a sorted tuple of 2 vertex indices)
+        edges = [
+            tuple(sorted([tri[0], tri[1]])),
+            tuple(sorted([tri[1], tri[2]])),
+            tuple(sorted([tri[2], tri[0]]))
+        ]
+        for edge in edges:
+            if edge not in edge_to_cells:
+                edge_to_cells[edge] = []
+            edge_to_cells[edge].append(i)
     
+    # For each edge shared by exactly 2 cells, mark those cells as adjacent
+    for edge, cell_indices in edge_to_cells.items():
+        if len(cell_indices) == 2:
+            # This edge is shared by exactly 2 cells, so they are adjacent
+            i, j = cell_indices
+            if cells[j] not in adjacency_dict[cells[i]]:
+                adjacency_dict[cells[i]].append(cells[j])
+            if cells[i] not in adjacency_dict[cells[j]]:
+                adjacency_dict[cells[j]].append(cells[i])
+    
+    print(f"    Adjacency dictionary complete", flush=True)
     return cells, adjacency_dict
 
 def find_nearest_centroid_cell_vectorized(positions, cells):
@@ -403,19 +411,56 @@ def reflecting_BC_arbitrary_shape(velocities, positions, boundary_points):
 
 def Arbitrary_Shape_Parameterized(N, fourier_coefficients, num_boundary_points, positions, T_x0, T_y0, dt, n_tot, e, mu, alpha):
 
+    print("  [DEBUG] Generating boundary points...", flush=True)
     boundary_points = sample_star_shape(fourier_coefficients, num_boundary_points)
-    mesh = create_mesh_from_star_shape(boundary_points)
+    print(f"  [DEBUG] Boundary points generated: {len(boundary_points)} points", flush=True)
     
+    print("  [DEBUG] Creating mesh (this may take a moment)...", flush=True)
+    mesh = create_mesh_from_star_shape(boundary_points)
+    print(f"  [DEBUG] Mesh created with {len(mesh.points)} points", flush=True)
+    
+    print("  [DEBUG] Creating cell list and adjacency dictionary (this may take a moment)...", flush=True)
     cells, adjacency_dict = create_cell_list_and_adjacency_list(mesh)
+    print(f"  [DEBUG] Created {len(cells)} cells", flush=True)
 
+    print("  [DEBUG] Assigning initial particle positions...", flush=True)
     positions = hf.assign_positions_arbitrary_2d(N, mesh)
+    print(f"  [DEBUG] Assigned {len(positions)} particle positions", flush=True)
+    
+    print("  [DEBUG] Sampling initial velocities...", flush=True)
     velocities = hf.sample_velocities_from_maxwellian_2d(T_x0, T_y0, N)
+    print(f"  [DEBUG] Sampled {len(velocities)} velocities", flush=True)
 
-    for position, velocity in zip(positions, velocities):
-        for cell in cells:
-            if cell.is_inside(position[0], position[1]):
-                cell.add_particle(position, velocity)
-                break
+    print(f"  [DEBUG] Assigning particles to cells (checking {len(cells)} cells for {len(positions)} particles)...", flush=True)
+    # Use vectorized approach for initial assignment too
+    if len(positions) > 0:
+        nearest_cells = find_nearest_centroid_cell_vectorized(positions, cells)
+        assigned_count = 0
+        for i, (position, velocity) in enumerate(zip(positions, velocities)):
+            nearest_cell = nearest_cells[i]
+            candidate_cells = [nearest_cell] + adjacency_dict.get(nearest_cell, [])
+            
+            assigned = False
+            for cell in candidate_cells:
+                if cell.is_inside(position[0], position[1]):
+                    cell.add_particle(position, velocity)
+                    assigned = True
+                    assigned_count += 1
+                    break
+            
+            if not assigned:
+                # Fallback: check all cells
+                for cell in cells:
+                    if cell.is_inside(position[0], position[1]):
+                        cell.add_particle(position, velocity)
+                        assigned_count += 1
+                        break
+            
+            # Progress indicator for initial assignment
+            if (i + 1) % 500 == 0:
+                print(f"    Assigned {i+1}/{len(positions)} particles...", flush=True)
+        
+        print(f"  [DEBUG] Assigned {assigned_count} particles to cells", flush=True)
 
     temperature_history = np.zeros(n_tot)
     
