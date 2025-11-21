@@ -3,106 +3,7 @@ import helpers as hf
 import numpy as np
 import periodic_bc as pb
 import time
-
-
-class cell_triangle:
-    def __init__(self, vertices):
-        """
-        vertices: a list or array of 3 coordinate pairs [(x1, y1), (x2, y2), (x3, y3)]
-        """
-        self.vertices = np.array(vertices)
-        self.center = np.mean(self.vertices, axis=0)  # centroid
-        self.particle_positions = np.empty((0, 2))
-        self.particle_velocities = np.empty((0, 2))
-        self.rho_cell = len(self.particle_positions) / self.area()
-
-        # make bounding box
-        minx = min(self.vertices[:,0])
-        maxx = max(self.vertices[:,0])
-        miny = min(self.vertices[:,1])
-        maxy = max(self.vertices[:,1])
-        self.bounding_box = (minx, maxx, miny, maxy)
-
-    
-        
-    def area(self):
-        # Use a robust 2D shoelace/cross-product formula for triangle area
-        x1, y1 = self.vertices[0]
-        x2, y2 = self.vertices[1]
-        x3, y3 = self.vertices[2]
-        return 0.5 * np.abs((x2 - x1) * (y3 - y1) - (x3 - x1) * (y2 - y1))
-
-    def is_inside(self, x, y):
-        """
-        Return True if point (x, y) lies inside or on the edges of the triangle.
-        Uses barycentric coordinates.
-        """
-        x1, y1 = self.vertices[0]
-        x2, y2 = self.vertices[1]
-        x3, y3 = self.vertices[2]
-
-        denom = (y2 - y3)*(x1 - x3) + (x3 - x2)*(y1 - y3)
-        a = ((y2 - y3)*(x - x3) + (x3 - x2)*(y - y3)) / denom
-        b = ((y3 - y1)*(x - x3) + (x1 - x3)*(y - y3)) / denom
-        c = 1 - a - b
-
-        return (a >= 0) and (b >= 0) and (c >= 0)
-
-    def add_particle(self, position, velocity):
-        position = np.asarray(position).reshape(1, 2)
-        velocity = np.asarray(velocity).reshape(1, 2)
-        self.particle_positions = np.vstack((self.particle_positions, position))
-        self.particle_velocities = np.vstack((self.particle_velocities, velocity))
-
-    def remove_particle(self, index):
-        self.particle_positions = np.delete(self.particle_positions, index, axis=0)
-        self.particle_velocities = np.delete(self.particle_velocities, index, axis=0)
-
-    def get_particle_positions(self):
-        return self.particle_positions
-
-    def get_particle_velocities(self):
-        return self.particle_velocities
-    
-    def upper_bound_cross_section(self):
-        if len(self.particle_velocities) == 0:
-            return 0.0
-        
-        v_mean = self.particle_velocities.mean(axis= 0)
-        delta_v = np.linalg.norm(self.particle_velocities - v_mean, axis=1).max()
-        return 2.0 * delta_v
-
-    def num_collisions(self, dt, e):
-        num_particles = len(self.particle_positions)
-        if num_particles < 2:
-            return 0
-        ub_sigma = self.upper_bound_cross_section()
-        expected_pairs = (num_particles * self.rho_cell * ub_sigma * dt) / (2 * e) if e != 0 else 0.0
-        expected_pairs_int = hf.Iround(expected_pairs)
-        max_pairs = num_particles // 2
-        return int(min(expected_pairs_int, max_pairs))
-
-    def collide_and_update_particles(self, dt, indices_i, indices_j):
-        v_i = self.particle_velocities[indices_i]
-        v_j = self.particle_velocities[indices_j]
-
-        v_rel = v_i - v_j                      
-        v_rel_mag = np.linalg.norm(v_rel, axis=1, keepdims=True)  
-
-        theta = np.random.uniform(0.0, 2.0*np.pi, size=len(indices_i))
-        omega = np.column_stack((np.cos(theta), np.sin(theta))) 
-
-        v_cm = 0.5 * (v_i + v_j)
-
-        v_i_prime = v_cm + 0.5 * v_rel_mag * omega
-        v_j_prime = v_cm - 0.5 * v_rel_mag * omega
-
-        self.particle_velocities[indices_i] = v_i_prime
-        self.particle_velocities[indices_j] = v_j_prime
-
-        self.particle_positions = self.particle_positions + self.particle_velocities * dt
-
-        return self.particle_positions, self.particle_velocities
+import cell_class as ct
 
 def sample_star_shape(c, N):
     """
@@ -136,9 +37,24 @@ def sample_star_shape(c, N):
     return np.column_stack([x, y])
 
 
-def create_mesh_from_star_shape(pts):
+def create_mesh_from_star_shape(pts, mesh_size=0.1):
+    """
+    Create a mesh from star shape boundary points.
+    
+    Parameters
+    ----------
+    pts : array-like
+        Boundary points
+    mesh_size : float, optional
+        Characteristic mesh size. Larger values = fewer, larger cells.
+        Default is 0.1.
+    
+    Returns
+    -------
+    mesh : pygmsh mesh object
+    """
     with pygmsh.geo.Geometry() as geom:
-        poly = geom.add_polygon(pts, mesh_size=0.1)
+        poly = geom.add_polygon(pts, mesh_size=mesh_size)
         mesh = geom.generate_mesh()
     return mesh
 
@@ -159,18 +75,15 @@ def create_cell_list_and_adjacency_list(mesh):
         Dictionary mapping cell_triangle objects to lists of adjacent cell_triangle objects.
         Each cell has 2-3 adjacent cells (2 for boundary cells, 3 for interior cells).
     """
-    # Extract triangle connectivity and points from mesh
     tri_conn = mesh.get_cells_type("triangle")
     pts2d = mesh.points[:, :2]  # Extract 2D coordinates
-    
-    print(f"    Creating {len(tri_conn)} cell objects...", flush=True)
-    # Create cell_triangle objects for each triangle
+
+
     cells = []
     for tri in tri_conn:
         verts = pts2d[tri][:, :2]   # shape (3, 2): the triangle's three (x,y) vertices
-        cells.append(cell_triangle(verts))
+        cells.append(ct.cell_triangle(verts))
     
-    print(f"    Building adjacency dictionary (optimized algorithm)...", flush=True)
     # Create adjacency dictionary using edge-based lookup (much faster than O(N^2))
     adjacency_dict = {cell: [] for cell in cells}
     
@@ -279,6 +192,15 @@ def get_boundary_edges(points):
 
 def point_to_line_distance(px, py, x1, y1, x2, y2):
     """
+    Parameters:
+    px, py : float
+        x and y coordinates of the point
+    x1, y1 : float
+        x and y coordinates of the start of the line segment
+    x2, y2 : float
+        x and y coordinates of the end of the line segment
+
+    Returns:
     Calculate the distance from a point to a line segment.
     Returns the distance and the closest point on the line segment.
     """
@@ -331,7 +253,15 @@ def get_edge_normal(x1, y1, x2, y2):
 
 def point_in_polygon(point_x, point_y, polygon_points):
     """
+    Parameters:
+    point_x, point_y : float
+        x and y coordinates of the point
+    polygon_points : list of (x, y) tuples
+        List of polygon points
+
+    Returns:
     Ray casting algorithm to determine if point is inside polygon.
+    Returns True if point is inside polygon, False otherwise.
     """
     num_vertices = len(polygon_points)
     is_inside = False
@@ -409,72 +339,68 @@ def reflecting_BC_arbitrary_shape(velocities, positions, boundary_points):
     return velocities, positions
 
 
-def Arbitrary_Shape_Parameterized(N, fourier_coefficients, num_boundary_points, positions, T_x0, T_y0, dt, n_tot, e, mu, alpha):
+def Arbitrary_Shape_Parameterized(N, fourier_coefficients, num_boundary_points, T_x0, T_y0, dt, n_tot, e, mu, alpha, mesh_size=0.1):
+    """
+    Run DSMC simulation on arbitrary parameterized shape.
+    
+    Workflow:
+    1. Create mesh from fourier coefficients
+    2. Generate positions (area-weighted) and velocities
+    3. Create adjacency dictionary
+    4. Run algorithm (collide + update positions)
+    5. Apply boundary condition
+    6. Rebin particles that violate cell invariant
+    
+    Parameters
+    ----------
+    N : int
+        Number of particles
+    fourier_coefficients : array-like
+        Fourier coefficients defining the shape
+    num_boundary_points : int
+        Number of points to sample along boundary
+    T_x0, T_y0 : float
+        Initial temperatures in x and y directions
+    dt : float
+        Time step
+    n_tot : int
+        Total number of time steps
+    e : float
+        Parameter for collision rate
+    mu : float
+        Viscosity parameter (unused currently)
+    alpha : float
+        VHS model parameter (unused currently)
+    mesh_size : float, optional
+        Characteristic mesh size. Larger values = fewer, larger cells.
+        Default is 0.1. Recommended: 0.05 (fine) to 0.5 (coarse).
+    """
+    
 
-    print("  [DEBUG] Generating boundary points...", flush=True)
     boundary_points = sample_star_shape(fourier_coefficients, num_boundary_points)
-    print(f"  [DEBUG] Boundary points generated: {len(boundary_points)} points", flush=True)
+    mesh = hf.create_arbitrary_shape_mesh_2d(N, boundary_points, mesh_size=mesh_size)
     
-    print("  [DEBUG] Creating mesh (this may take a moment)...", flush=True)
-    mesh = create_mesh_from_star_shape(boundary_points)
-    print(f"  [DEBUG] Mesh created with {len(mesh.points)} points", flush=True)
-    
-    print("  [DEBUG] Creating cell list and adjacency dictionary (this may take a moment)...", flush=True)
-    cells, adjacency_dict = create_cell_list_and_adjacency_list(mesh)
-    print(f"  [DEBUG] Created {len(cells)} cells", flush=True)
-
-    print("  [DEBUG] Assigning initial particle positions...", flush=True)
     positions = hf.assign_positions_arbitrary_2d(N, mesh)
-    print(f"  [DEBUG] Assigned {len(positions)} particle positions", flush=True)
-    
-    print("  [DEBUG] Sampling initial velocities...", flush=True)
     velocities = hf.sample_velocities_from_maxwellian_2d(T_x0, T_y0, N)
-    print(f"  [DEBUG] Sampled {len(velocities)} velocities", flush=True)
-
-    print(f"  [DEBUG] Assigning particles to cells (checking {len(cells)} cells for {len(positions)} particles)...", flush=True)
-    # Use vectorized approach for initial assignment too
-    if len(positions) > 0:
-        nearest_cells = find_nearest_centroid_cell_vectorized(positions, cells)
-        assigned_count = 0
-        for i, (position, velocity) in enumerate(zip(positions, velocities)):
-            nearest_cell = nearest_cells[i]
-            candidate_cells = [nearest_cell] + adjacency_dict.get(nearest_cell, [])
-            
-            assigned = False
-            for cell in candidate_cells:
-                if cell.is_inside(position[0], position[1]):
-                    cell.add_particle(position, velocity)
-                    assigned = True
-                    assigned_count += 1
-                    break
-            
-            if not assigned:
-                # Fallback: check all cells
-                for cell in cells:
-                    if cell.is_inside(position[0], position[1]):
-                        cell.add_particle(position, velocity)
-                        assigned_count += 1
-                        break
-            
-            # Progress indicator for initial assignment
-            if (i + 1) % 500 == 0:
-                print(f"    Assigned {i+1}/{len(positions)} particles...", flush=True)
-        
-        print(f"  [DEBUG] Assigned {assigned_count} particles to cells", flush=True)
-
-    temperature_history = np.zeros(n_tot)
     
-    print(f"Starting simulation with {len(cells)} cells and {N} particles...")
-    print(f"Progress: ", end="", flush=True)
+    cell_list, adjacency_dict = create_cell_list_and_adjacency_list(mesh)
+
+    for position, velocity in zip(positions, velocities):
+        for cell in cell_list:
+            if cell.is_inside(position[0], position[1]):
+                cell.add_particle(position, velocity)
+                break
+    
+    temperature_history = np.zeros(n_tot)
     
     total_start_time = time.time()
     
     for n in range(n_tot):
         step_start_time = time.time()
         
-        # Collision step
+        # Step 4: Run collision algorithm
         collision_start = time.time()
-        for cell in cells: 
+        for cell in cell_list: 
             num_collisions = cell.num_collisions(dt, e)
 
             indices_particles = np.arange(len(cell.particle_positions))
@@ -506,66 +432,70 @@ def Arbitrary_Shape_Parameterized(N, fourier_coefficients, num_boundary_points, 
                     cell.collide_and_update_particles(dt, indices_i, indices_j)
         collision_time = time.time() - collision_start
 
-        # Reconstruct global arrays from cells after collisions
-        reconstruct_start = time.time()
-        all_positions = []
-        all_velocities = []
-        for cell in cells:
-            if len(cell.particle_positions) > 0:
-                all_positions.append(cell.particle_positions)
-                all_velocities.append(cell.particle_velocities)
-        
-        if all_positions:
-            positions = np.vstack(all_positions)
-            velocities = np.vstack(all_velocities)
-        else:
-            positions = np.empty((0, 2))
-            velocities = np.empty((0, 2))
-        reconstruct_time = time.time() - reconstruct_start
-
-        # Apply reflecting boundary condition on global arrays
         bc_start = time.time()
-        velocities, positions = reflecting_BC_arbitrary_shape(velocities, positions, boundary_points)
+        total_kinetic_energy = 0.0
+        total_particles = 0
+        
+        for cell in cell_list:
+            if len(cell.particle_positions) > 0:
+                cell.particle_velocities, cell.particle_positions = reflecting_BC_arbitrary_shape(
+                    cell.particle_velocities, cell.particle_positions, boundary_points
+                )
+                # Track temperature (sum of squared velocities)
+                total_kinetic_energy += np.sum(cell.particle_velocities**2)
+                total_particles += len(cell.particle_velocities)
+        
+        # Track temperature
+        temperature_history[n] = total_kinetic_energy / total_particles if total_particles > 0 else 0.0
         bc_time = time.time() - bc_start
 
-        # Track temperature
-        temperature_history[n] = np.sum(velocities**2) / velocities.shape[0] if len(velocities) > 0 else 0.0
-
-        # Re-binning particles into cells
+        # Step 6: Rebin particles that violate cell invariant
         rebin_start = time.time()
-        # Clear all cells first (necessary because particles have moved)
-        for cell in cells:
-            cell.particle_positions = np.empty((0, 2))
-            cell.particle_velocities = np.empty((0, 2))
+        particles_to_move = []  # List of (old_cell, particle_idx, position, velocity)
         
-        # Re-assign particles to cells using adjacency_dict for efficiency
-        # Use vectorized nearest cell finding
-        fallback_count = 0
-        if len(positions) > 0:
-            nearest_cells = find_nearest_centroid_cell_vectorized(positions, cells)
+        # Loop through cells and detect particles that don't respect the invariant
+        for cell in cell_list:
+            indices_to_remove = []
+            for i, position in enumerate(cell.particle_positions):
+                if not cell.is_inside(position[0], position[1]):
+                    # Particle violates invariant - mark for removal and rebinning
+                    particles_to_move.append((cell, i, position, cell.particle_velocities[i]))
+                    indices_to_remove.append(i)
             
-            # Now assign particles using the nearest cells
-            for i, (position, velocity) in enumerate(zip(positions, velocities)):
-                nearest_cell = nearest_cells[i]
-                
-                # Get candidate cells: nearest cell + its adjacent cells
-                candidate_cells = [nearest_cell] + adjacency_dict.get(nearest_cell, [])
-                
-                # Check only candidate cells to find which one contains the particle
-                assigned = False
-                for cell in candidate_cells:
+            # Remove violating particles from this cell (in reverse order to preserve indices)
+            for i in reversed(indices_to_remove):
+                cell.remove_particle(i)
+        
+        # Now reassign the violating particles to their correct cells
+        fallback_count = 0
+        for old_cell, _, position, velocity in particles_to_move:
+            # Find the nearest centroid
+            nearest_cell = find_nearest_centroid_cell(position, cell_list)
+            
+            # Get candidate cells: nearest cell + its adjacent cells
+            candidate_cells = [nearest_cell] + adjacency_dict.get(nearest_cell, [])
+            
+            # Check candidate cells to find which one contains the particle
+            assigned = False
+            for cell in candidate_cells:
+                if cell.is_inside(position[0], position[1]):
+                    cell.add_particle(position, velocity)
+                    assigned = True
+                    break
+            
+            # If not found in candidate cells, fall back to checking all cells
+            if not assigned:
+                fallback_count += 1
+                for cell in cell_list:
                     if cell.is_inside(position[0], position[1]):
                         cell.add_particle(position, velocity)
                         assigned = True
                         break
                 
-                # If not found in candidate cells, fall back to checking all cells
                 if not assigned:
-                    fallback_count += 1
-                    for cell in cells:
-                        if cell.is_inside(position[0], position[1]):
-                            cell.add_particle(position, velocity)
-                            break
+                    # This shouldn't happen, but log if it does
+                    print(f"Warning: Could not assign particle at {position}", flush=True)
+        
         rebin_time = time.time() - rebin_start
         
         step_time = time.time() - step_start_time
@@ -574,17 +504,35 @@ def Arbitrary_Shape_Parameterized(N, fourier_coefficients, num_boundary_points, 
         if (n + 1) % 10 == 0 or (n + 1) == n_tot:
             print(f"{n+1}/{n_tot} ", end="", flush=True)
             if (n + 1) == n_tot or (n + 1) % 50 == 0:
+                num_moved = len(particles_to_move)
                 print(f"\n  Step {n+1} timing: collisions={collision_time:.3f}s, "
-                      f"reconstruct={reconstruct_time:.3f}s, BC={bc_time:.3f}s, "
-                      f"rebin={rebin_time:.3f}s, total={step_time:.3f}s")
+                      f"BC={bc_time:.3f}s, rebin={rebin_time:.3f}s, total={step_time:.3f}s")
+                print(f"  Rebinned {num_moved} particles", end="")
                 if fallback_count > 0:
-                    print(f"  Warning: {fallback_count} particles needed fallback search")
+                    print(f" ({fallback_count} needed fallback search)", flush=True)
+                else:
+                    print(flush=True)
+    
+    # Reconstruct final global arrays from cells
+    all_positions = []
+    all_velocities = []
+    for cell in cell_list:
+        if len(cell.particle_positions) > 0:
+            all_positions.append(cell.particle_positions)
+            all_velocities.append(cell.particle_velocities)
+    
+    if all_positions:
+        final_positions = np.vstack(all_positions)
+        final_velocities = np.vstack(all_velocities)
+    else:
+        final_positions = np.empty((0, 2))
+        final_velocities = np.empty((0, 2))
     
     total_time = time.time() - total_start_time
     print(f"\nSimulation completed in {total_time:.2f} seconds ({total_time/60:.2f} minutes)")
     print(f"Average time per step: {total_time/n_tot:.3f} seconds")
     
-    return positions, velocities, temperature_history
+    return final_positions, final_velocities, temperature_history, cell_list, boundary_points
 
 
 

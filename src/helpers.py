@@ -2,15 +2,30 @@ import numpy as np
 import pygmsh 
 
 
-def create_arbitrary_shape_mesh_2d(N, points):
+def create_arbitrary_shape_mesh_2d(N, points, mesh_size=0.1):
     """
     Create an arbitrary shape in 2D using B-spline curves for smooth boundaries.
+    
+    Parameters
+    ----------
+    N : int
+        Number of particles (not used for mesh generation, kept for compatibility)
+    points : array-like
+        Boundary points defining the shape
+    mesh_size : float, optional
+        Characteristic mesh size. Larger values = fewer, larger cells.
+        Default is 0.1. Typical range: 0.05 (fine) to 0.5 (coarse).
+    
+    Returns
+    -------
+    mesh : pygmsh mesh object
+        Generated triangular mesh
     """
 
     with pygmsh.occ.Geometry() as geom:
 
-        # 1) Add gmsh points
-        gmpts = [geom.add_point([x, y]) for (x, y) in points]
+        # 1) Add gmsh points with mesh size
+        gmpts = [geom.add_point([x, y], mesh_size=mesh_size) for (x, y) in points]
 
         # 2) Create B-spline curve connecting all points
         # For a closed B-spline, we need to repeat the first point at the end

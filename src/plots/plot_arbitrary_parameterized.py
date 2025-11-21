@@ -55,22 +55,44 @@ def plot_triangular_mesh(mesh, ax, color='gray', linewidth=0.5, alpha=0.3):
             ax.plot([p3[0], p1[0]], [p3[1], p1[1]], 
                    color=color, linewidth=linewidth, alpha=alpha)
 
-# Hard-coded Fourier coefficients for star shape
-# 5-pointed star: c0=3.0, c1=1.0, c6=0.5 (M=5, so c6 is c_{M+1})
-# This gives us 2M+1 = 11 coefficients
-FOURIER_COEFFICIENTS = np.array([3.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.5, 0.0, 0.0, 0.0, 0.0])
+# Hard-coded Fourier coefficients for complex organic shape
+# Using M=8 modes for highly detailed, intricate boundary
+# Formula: r(t) = c0 + Σ[c_m*cos(m*t) + c_{m+M}*sin(m*t)] for m=1 to M
+# Array structure: [c0, c1, c2, ..., c8, c9, c10, ..., c16]
+#                  [base, ----cosine terms----, ----sine terms----]
+# IMPORTANT: Keep sum of |coefficients| < c0 to avoid self-intersection
+FOURIER_COEFFICIENTS = np.array([
+    4.0,      # c0: base radius (must be > sum of absolute values of other coeffs)
+    0.4,      # c1: 1-fold (asymmetry/shift)
+    0.35,     # c2: 2-fold (elliptical component)
+    0.45,     # c3: 3-fold (triangular component)
+    0.20,     # c4: 4-fold (square-ish component)
+    0.40,     # c5: 5-fold (pentagonal component)
+    0.15,     # c6: 6-fold (hexagonal component)
+    0.25,     # c7: 7-fold (heptagonal component)
+    0.18,     # c8: 8-fold (octagonal component)
+    0.25,     # c9: sine term for m=1 (rotation/phase)
+    0.15,     # c10: sine term for m=2
+    0.30,     # c11: sine term for m=3
+    0.12,     # c12: sine term for m=4
+    0.22,     # c13: sine term for m=5
+    0.08,     # c14: sine term for m=6
+    0.18,     # c15: sine term for m=7
+    0.10      # c16: sine term for m=8
+])  # Total: 2*8+1 = 17 coefficients for M=8 modes
+# Sum of |coefficients| = 3.78, so c0=4.0 ensures r(t) > 0.2 always (no self-intersection)
 
 # Hard-coded simulation parameters
 SIMULATION_PARAMS = {
-    'N': 2000,                    # Number of particles
+    'N': 3000,                    # Number of particles (increased for larger shape)
     'dt': 0.01,                   # Time step
-    'n_tot': 100,                 # Total time steps
+    'n_tot': 150,                 # Total time steps
     'e': 1.0,                     # Energy parameter
     'mu': 1.0,                    # Mass parameter
     'alpha': 1.0,                 # Alpha parameter
     'T_x0': 1.0,                  # Initial x-temperature
     'T_y0': 1.0,                  # Initial y-temperature
-    'num_boundary_points': 100    # Number of boundary points
+    'num_boundary_points': 300    # Increased to capture complex boundary detail
 }
 
 def plot_velocity_field(positions, velocities, ax, scale=0.1):
@@ -102,13 +124,17 @@ def plot_velocity_field(positions, velocities, ax, scale=0.1):
 
 def main():
     print("=== Arbitrary Parameterized Shape 2D DSMC Simulation ===")
-    print("This simulation uses Fourier coefficients to define star-shaped boundaries.")
+    print("This simulation uses Fourier coefficients to define complex organic boundaries.")
     
     # Use hard-coded Fourier coefficients
     fourier_coefficients = FOURIER_COEFFICIENTS
     M = (len(fourier_coefficients) - 1) // 2
     print(f"\nUsing {len(fourier_coefficients)} Fourier coefficients (M={M} modes)")
-    print(f"Fourier coefficients: {fourier_coefficients}")
+    print("Complex shape with multiple active harmonics (modes 1-8)")
+    print(f"Fourier coefficients:")
+    print(f"  Base radius (c0): {fourier_coefficients[0]:.2f}")
+    print(f"  Cosine terms (c1-c{M}): {fourier_coefficients[1:M+1]}")
+    print(f"  Sine terms (c{M+1}-c{2*M}): {fourier_coefficients[M+1:2*M+1]}")
     
     # Use hard-coded simulation parameters
     params = SIMULATION_PARAMS
@@ -134,22 +160,21 @@ def main():
     print(f"  Initial temperatures: T_x0={T_x0}, T_y0={T_y0}")
     print(f"  Boundary points: {num_boundary_points}")
     
-    # Generate boundary points for visualization
-    boundary_points = sample_star_shape(fourier_coefficients, num_boundary_points)
-    mesh = create_mesh_from_star_shape(boundary_points)
-    
-    # Placeholder positions (will be re-initialized inside Arbitrary_Shape_Parameterized)
-    positions = np.zeros((N, 2))
+    # Use medium mesh_size for complex shape (need to capture details properly)
+    # mesh_size values: 0.05 (very fine), 0.1 (default), 0.3 (coarse), 0.5 (very coarse)
+    # Complex shapes need finer meshes to avoid meshing artifacts
+    mesh_size = 0.25  # Medium mesh_size = moderate cell count, captures boundary details
     
     print(f"\nRunning simulation with {N} particles for {n_tot} time steps...")
-    print(f"Boundary shape: {num_boundary_points} points, {M} Fourier modes")
+    print(f"Boundary shape: {num_boundary_points} points sampling complex boundary")
+    print(f"Active Fourier modes: {M} (creates highly detailed organic shape)")
+    print(f"Mesh size: {mesh_size} (larger = fewer cells)")
     
-    # Run the simulation
-    positions, velocities, temperature_history = Arbitrary_Shape_Parameterized(
+    # Run the simulation (positions are generated internally with area weighting)
+    positions, velocities, temperature_history, cell_list, boundary_points = Arbitrary_Shape_Parameterized(
         N=N,
         fourier_coefficients=fourier_coefficients,
         num_boundary_points=num_boundary_points,
-        positions=positions,
         T_x0=T_x0,
         T_y0=T_y0,
         dt=dt,
@@ -157,9 +182,14 @@ def main():
         e=e,
         mu=mu,
         alpha=alpha,
+        mesh_size=mesh_size,
     )
     
-    print("Simulation completed!")
+    # Recreate mesh for visualization with same mesh_size
+    mesh = create_mesh_from_star_shape(boundary_points, mesh_size=mesh_size)
+    
+    print(f"Simulation completed!")
+    print(f"Total mesh cells created: {len(cell_list)}")
     
     # Create comprehensive visualization
     fig = plt.figure(figsize=(18, 12))
@@ -167,17 +197,17 @@ def main():
     # Plot 1: Final particle positions with mesh
     ax1 = plt.subplot(2, 3, 1)
     if len(positions) > 0:
-        ax1.scatter(positions[:, 0], positions[:, 1], s=2, alpha=0.6, c='blue', label='Particles')
+        ax1.scatter(positions[:, 0], positions[:, 1], s=3, alpha=0.6, c='blue', label='Particles')
     
-    # Plot mesh
-    plot_triangular_mesh(mesh, ax1, color='gray', linewidth=0.5, alpha=0.3)
+    # Plot mesh - subtle lines to show cell structure
+    plot_triangular_mesh(mesh, ax1, color='gray', linewidth=0.5, alpha=0.4)
     
     # Plot boundary
     plot_boundary(boundary_points, ax1, color='red', linewidth=2, label='Boundary')
     
     ax1.set_xlabel('X Position')
     ax1.set_ylabel('Y Position')
-    ax1.set_title('Final Particle Positions')
+    ax1.set_title(f'Final Particle Positions (N={len(positions)}, Cells={len(cell_list)})')
     ax1.legend()
     ax1.grid(True, alpha=0.3)
     ax1.set_aspect('equal')
@@ -265,6 +295,18 @@ def main():
         print(f"Std speed: {np.std(speeds):.4f}")
         print(f"Mean vx: {np.mean(velocities[:, 0]):.4f}")
         print(f"Mean vy: {np.mean(velocities[:, 1]):.4f}")
+    
+    # Cell statistics
+    particle_counts = [len(cell.particle_positions) for cell in cell_list]
+    cell_areas = [cell.area() for cell in cell_list]
+    
+    print(f"\nMesh Statistics:")
+    print(f"Mesh size parameter: {mesh_size}")
+    print(f"Total cells: {len(cell_list)}")
+    print(f"Particles per cell - Mean: {np.mean(particle_counts):.2f}, Std: {np.std(particle_counts):.2f}")
+    print(f"Particles per cell - Min: {np.min(particle_counts)}, Max: {np.max(particle_counts)}")
+    print(f"Cell areas - Mean: {np.mean(cell_areas):.4f}, Min: {np.min(cell_areas):.4f}, Max: {np.max(cell_areas):.4f}")
+    print(f"Empty cells: {sum(1 for count in particle_counts if count == 0)}")
 
 def create_animated_visualization():
     """
