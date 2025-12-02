@@ -96,6 +96,7 @@ def create_cell_list_and_adjacency_list(mesh):
             tuple(sorted([tri[1], tri[2]])),
             tuple(sorted([tri[2], tri[0]]))
         ]
+
         for edge in edges:
             if edge not in edge_to_cells:
                 edge_to_cells[edge] = []
