@@ -4,6 +4,10 @@ import numpy as np
 import periodic_bc as pb
 import time
 import cell_class as ct
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from edge_class import Edge
 
 def sample_star_shape(c, N):
     """
@@ -59,7 +63,7 @@ def create_mesh_from_star_shape(pts, mesh_size=0.1):
     return mesh
 
 
-def create_cell_list_and_adjacency_list(mesh):
+def create_cell_list_and_adjacency_lists(mesh):
     """
     Create an adjacency dictionary for all triangle cells in the mesh.
     Optimized version using edge-based lookup for O(N) complexity instead of O(N^2).
@@ -87,33 +91,36 @@ def create_cell_list_and_adjacency_list(mesh):
     # Create adjacency dictionary using edge-based lookup (much faster than O(N^2))
     adjacency_dict = {cell: [] for cell in cells}
     
-    # Build edge-to-cells mapping: each edge (as sorted tuple) maps to list of cells containing it
+    # Build edge-to-cells mapping: each edge maps to list of cell objects containing it
+    # Note: edges must be created using vertex coordinates (not indices) to match cell.edges
     edge_to_cells = {}
     for i, tri in enumerate(tri_conn):
-        # Get all 3 edges of the triangle (each edge is a sorted tuple of 2 vertex indices)
+        # Get the cell's vertices (as coordinate pairs, not indices)
+        verts = cells[i].vertices
+        # Get all 3 edges of the triangle using vertex coordinates (matching cell.edges format)
         edges = [
-            tuple(sorted([tri[0], tri[1]])),
-            tuple(sorted([tri[1], tri[2]])),
-            tuple(sorted([tri[2], tri[0]]))
+            Edge(verts[0], verts[1]),  # AB edge
+            Edge(verts[1], verts[2]),  # BC edge
+            Edge(verts[2], verts[0])   # CA edge
         ]
 
         for edge in edges:
             if edge not in edge_to_cells:
                 edge_to_cells[edge] = []
-            edge_to_cells[edge].append(i)
+            edge_to_cells[edge].append(cells[i])
     
     # For each edge shared by exactly 2 cells, mark those cells as adjacent
-    for edge, cell_indices in edge_to_cells.items():
-        if len(cell_indices) == 2:
+    for edge, cell_list in edge_to_cells.items():
+        if len(cell_list) == 2:
             # This edge is shared by exactly 2 cells, so they are adjacent
-            i, j = cell_indices
-            if cells[j] not in adjacency_dict[cells[i]]:
-                adjacency_dict[cells[i]].append(cells[j])
-            if cells[i] not in adjacency_dict[cells[j]]:
-                adjacency_dict[cells[j]].append(cells[i])
+            cell_i, cell_j = cell_list
+            if cell_j not in adjacency_dict[cell_i]:
+                adjacency_dict[cell_i].append(cell_j)
+            if cell_i not in adjacency_dict[cell_j]:
+                adjacency_dict[cell_j].append(cell_i)
     
     print(f"    Adjacency dictionary complete", flush=True)
-    return cells, adjacency_dict
+    return cells, adjacency_dict, edge_to_cells
 
 def find_nearest_centroid_cell_vectorized(positions, cells):
     """
@@ -278,6 +285,114 @@ def point_in_polygon(point_x, point_y, polygon_points):
     
     return is_inside
 
+def triangle_to_follow(position, cell, edge_to_cells, adjacency_dict):
+    """
+    Find the triangle to follow for a particle using barycentric coordinates.
+    
+    Barycentric coordinates:
+    - a corresponds to vertex A (vertices[0])
+    - b corresponds to vertex B (vertices[1])
+    - c corresponds to vertex C (vertices[2])
+    
+    When a barycentric coordinate is negative, the point is outside on the 
+    opposite side of the edge opposite to that vertex:
+    - a < 0: point is outside edge BC (opposite to vertex A) -> use edges[1]
+    - b < 0: point is outside edge CA (opposite to vertex B) -> use edges[2]
+    - c < 0: point is outside edge AB (opposite to vertex C) -> use edges[0]
+    
+    Parameters
+    ----------
+    position : array-like of shape (2,)
+        Particle position (x, y)
+    cell : cell_triangle
+        Current cell to check
+    edge_to_cells : dict
+        Dictionary mapping Edge objects to lists of cell objects
+    adjacency_dict : dict
+        Dictionary mapping cells to adjacent cells (unused but kept for compatibility)
+        
+    Returns
+    -------
+    cell_triangle
+        The adjacent cell across the edge the particle is outside of, or the current cell if inside
+    """
+    x, y = position[0], position[1]
+    x1, y1 = cell.vertices[0]  # vertex A
+    x2, y2 = cell.vertices[1]  # vertex B
+    x3, y3 = cell.vertices[2]  # vertex C
+
+    denom = (y2 - y3)*(x1 - x3) + (x3 - x2)*(y1 - y3)
+    if abs(denom) < 1e-12:
+        # Degenerate triangle, return current cell
+        return cell
+        
+    a = ((y2 - y3)*(x - x3) + (x3 - x2)*(y - y3)) / denom
+    b = ((y3 - y1)*(x - x3) + (x1 - x3)*(y - y3)) / denom
+    c = 1 - a - b
+    
+    # Map negative barycentric coordinates to the correct edge
+    # edges[0] = AB, edges[1] = BC, edges[2] = CA
+    if a < 0:
+        # Point is outside on the side opposite to vertex A, so it's outside edge BC
+        edge = cell.edges[1]  # BC edge
+    elif b < 0:
+        # Point is outside on the side opposite to vertex B, so it's outside edge CA
+        edge = cell.edges[2]  # CA edge
+    elif c < 0:
+        # Point is outside on the side opposite to vertex C, so it's outside edge AB
+        edge = cell.edges[0]  # AB edge
+    else:
+        # All barycentric coordinates are non-negative, point is inside the triangle
+        return cell
+    
+    # Get cells sharing this edge and return the one that's not the current cell
+    candidate_cells = edge_to_cells.get(edge, [])
+    for candidate in candidate_cells:
+        if candidate is not cell:
+            return candidate
+    
+    # If no adjacent cell found (boundary edge), return current cell
+    return cell
+
+def find_containing_cell(position, start_cell, edge_to_cells, adjacency_dict):
+    """
+    Iteratively follow triangles using triangle_to_follow until we find a cell where 
+    cell.is_inside(position) is satisfied. This is guaranteed to find the correct cell
+    for any position within the mesh domain.
+    
+    Parameters
+    ----------
+    position : array-like of shape (2,)
+        Particle position (x, y)
+    start_cell : cell_triangle
+        Initial cell to start the search from (typically the nearest centroid cell)
+    edge_to_cells : dict
+        Dictionary mapping Edge objects to lists of cell objects
+    adjacency_dict : dict
+        Dictionary mapping cells to adjacent cells (unused but kept for compatibility)
+        
+    Returns
+    -------
+    cell_triangle
+        The cell that contains the position (guaranteed to find it)
+    """
+    current_cell = start_cell
+    
+    while True:
+        # Check if current cell contains the position
+        if current_cell.is_inside(position[0], position[1]):
+            return current_cell
+        
+        # Get the next cell to follow
+        next_cell = triangle_to_follow(position, current_cell, edge_to_cells, adjacency_dict)
+        
+        # If we're stuck (next_cell is the same as current_cell), we've reached a boundary
+        # In this case, the point must be on the boundary, so return the current cell
+        if next_cell is current_cell:
+            return current_cell
+        
+        current_cell = next_cell
+
 def reflecting_BC_arbitrary_shape(velocities, positions, boundary_points):
     """
     Apply reflecting boundary condition for arbitrary 2D shape.
@@ -384,7 +499,7 @@ def Arbitrary_Shape_Parameterized(N, fourier_coefficients, num_boundary_points, 
     positions = hf.assign_positions_arbitrary_2d(N, mesh)
     velocities = hf.sample_velocities_from_maxwellian_2d(T_x0, T_y0, N)
     
-    cell_list, adjacency_dict = create_cell_list_and_adjacency_list(mesh)
+    cell_list, adjacency_dict, edge_to_cells = create_cell_list_and_adjacency_lists(mesh)
 
     for position, velocity in zip(positions, velocities):
         for cell in cell_list:
@@ -468,34 +583,20 @@ def Arbitrary_Shape_Parameterized(N, fourier_coefficients, num_boundary_points, 
                 cell.remove_particle(i)
         
         # Now reassign the violating particles to their correct cells
-        fallback_count = 0
-        for old_cell, _, position, velocity in particles_to_move:
-            # Find the nearest centroid
-            nearest_cell = find_nearest_centroid_cell(position, cell_list)
+        if len(particles_to_move) > 0:
+            # Extract all positions for vectorized nearest centroid lookup
+            positions_to_rebin = np.array([position for _, _, position, _ in particles_to_move])
             
-            # Get candidate cells: nearest cell + its adjacent cells
-            candidate_cells = [nearest_cell] + adjacency_dict.get(nearest_cell, [])
+            # Find nearest centroid cells for all particles at once (much faster)
+            nearest_cells = find_nearest_centroid_cell_vectorized(positions_to_rebin, cell_list)
             
-            # Check candidate cells to find which one contains the particle
-            assigned = False
-            for cell in candidate_cells:
-                if cell.is_inside(position[0], position[1]):
-                    cell.add_particle(position, velocity)
-                    assigned = True
-                    break
-            
-            # If not found in candidate cells, fall back to checking all cells
-            if not assigned:
-                fallback_count += 1
-                for cell in cell_list:
-                    if cell.is_inside(position[0], position[1]):
-                        cell.add_particle(position, velocity)
-                        assigned = True
-                        break
+            # Now iterate through and find containing cells using triangle following
+            for (old_cell, _, position, velocity), nearest_cell in zip(particles_to_move, nearest_cells):
+                # Use triangle_to_follow to iteratively find the containing cell
+                containing_cell = find_containing_cell(position, nearest_cell, edge_to_cells, adjacency_dict)
                 
-                if not assigned:
-                    # This shouldn't happen, but log if it does
-                    print(f"Warning: Could not assign particle at {position}", flush=True)
+                # Add particle to the containing cell
+                containing_cell.add_particle(position, velocity)
         
         rebin_time = time.time() - rebin_start
         
@@ -508,11 +609,7 @@ def Arbitrary_Shape_Parameterized(N, fourier_coefficients, num_boundary_points, 
                 num_moved = len(particles_to_move)
                 print(f"\n  Step {n+1} timing: collisions={collision_time:.3f}s, "
                       f"BC={bc_time:.3f}s, rebin={rebin_time:.3f}s, total={step_time:.3f}s")
-                print(f"  Rebinned {num_moved} particles", end="")
-                if fallback_count > 0:
-                    print(f" ({fallback_count} needed fallback search)", flush=True)
-                else:
-                    print(flush=True)
+                print(f"  Rebinned {num_moved} particles", flush=True)
     
     # Reconstruct final global arrays from cells
     all_positions = []

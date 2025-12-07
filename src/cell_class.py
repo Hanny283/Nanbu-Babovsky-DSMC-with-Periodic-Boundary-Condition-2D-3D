@@ -9,6 +9,7 @@ class cell_triangle:
         """
         self.vertices = np.array(vertices)
         self.center = np.mean(self.vertices, axis=0)  # centroid
+        self.edges = [Edge(self.vertices[0], self.vertices[1]), Edge(self.vertices[1], self.vertices[2]), Edge(self.vertices[2], self.vertices[0])]
         self.particle_positions = np.empty((0, 2))
         self.particle_velocities = np.empty((0, 2))
         self.rho_cell = len(self.particle_positions) / self.area()
