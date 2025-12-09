@@ -6,7 +6,12 @@ import time
 import cell_class as ct
 import sys
 import os
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from scipy.spatial import cKDTree
+
+# Add root directory to path to import edge_class
+_root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if _root_dir not in sys.path:
+    sys.path.insert(0, _root_dir)
 from edge_class import Edge
 
 def sample_star_shape(c, N):
@@ -65,7 +70,7 @@ def create_mesh_from_star_shape(pts, mesh_size=0.1):
 
 def create_cell_list_and_adjacency_lists(mesh):
     """
-    Create an adjacency dictionary for all triangle cells in the mesh.
+    Create cell list and edge-to-cells mapping for all triangle cells in the mesh.
     Optimized version using edge-based lookup for O(N) complexity instead of O(N^2).
     
     Parameters
@@ -75,9 +80,11 @@ def create_cell_list_and_adjacency_lists(mesh):
         
     Returns
     -------
-    adjacency_dict : dict
-        Dictionary mapping cell_triangle objects to lists of adjacent cell_triangle objects.
-        Each cell has 2-3 adjacent cells (2 for boundary cells, 3 for interior cells).
+    cells : list
+        List of cell_triangle objects
+    edge_to_cells : dict
+        Dictionary mapping Edge objects to lists of cell objects containing each edge.
+        Interior edges map to 2 cells, boundary edges map to 1 cell.
     """
     tri_conn = mesh.get_cells_type("triangle")
     pts2d = mesh.points[:, :2]  # Extract 2D coordinates
@@ -87,9 +94,6 @@ def create_cell_list_and_adjacency_lists(mesh):
     for tri in tri_conn:
         verts = pts2d[tri][:, :2]   # shape (3, 2): the triangle's three (x,y) vertices
         cells.append(ct.cell_triangle(verts))
-    
-    # Create adjacency dictionary using edge-based lookup (much faster than O(N^2))
-    adjacency_dict = {cell: [] for cell in cells}
     
     # Build edge-to-cells mapping: each edge maps to list of cell objects containing it
     # Note: edges must be created using vertex coordinates (not indices) to match cell.edges
@@ -109,23 +113,20 @@ def create_cell_list_and_adjacency_lists(mesh):
                 edge_to_cells[edge] = []
             edge_to_cells[edge].append(cells[i])
     
-    # For each edge shared by exactly 2 cells, mark those cells as adjacent
-    for edge, cell_list in edge_to_cells.items():
-        if len(cell_list) == 2:
-            # This edge is shared by exactly 2 cells, so they are adjacent
-            cell_i, cell_j = cell_list
-            if cell_j not in adjacency_dict[cell_i]:
-                adjacency_dict[cell_i].append(cell_j)
-            if cell_i not in adjacency_dict[cell_j]:
-                adjacency_dict[cell_j].append(cell_i)
-    
-    print(f"    Adjacency dictionary complete", flush=True)
-    return cells, adjacency_dict, edge_to_cells
+    print(f"    Edge-to-cells mapping complete", flush=True)
+    return cells, edge_to_cells
 
 def find_nearest_centroid_cell_vectorized(positions, cells):
     """
     Find the nearest centroid cell for multiple positions using vectorized operations.
     Much faster than calling find_nearest_centroid_cell for each position.
+    
+    Time complexity: O(N × M) where N = number of positions, M = number of cells.
+    This is optimal for typical mesh sizes (hundreds of cells).
+    
+    For very large meshes (thousands of cells), consider using scipy.spatial.cKDTree
+    which has O(N × log(M)) query time, but with O(M × log(M)) build overhead.
+    KD-trees typically become faster when M > ~1000 cells.
     
     Parameters
     ----------
@@ -153,6 +154,46 @@ def find_nearest_centroid_cell_vectorized(positions, cells):
     
     # Find index of nearest cell for each position
     nearest_indices = np.argmin(dists_sq, axis=1)
+    
+    # Return list of nearest cells
+    return [cells[idx] for idx in nearest_indices]
+
+def find_nearest_centroid_cell_kdtree(positions, cells):
+    """
+    Find the nearest centroid cell for multiple positions using KD-tree.
+    Faster than vectorized version for large meshes (thousands of cells).
+    
+    Time complexity: O(N × log(M)) for queries, O(M × log(M)) for building tree.
+    This is optimal for large meshes (M > ~1000 cells).
+    
+    For small meshes (M < ~500 cells), the vectorized version may be faster
+    due to lower overhead and NumPy optimizations.
+    
+    Parameters
+    ----------
+    positions : array-like of shape (N, 2)
+        Particle positions
+    cells : list
+        List of cell_triangle objects
+        
+    Returns
+    -------
+    nearest_cells : list
+        List of nearest cell for each position
+    """
+    if len(positions) == 0:
+        return []
+    
+    positions = np.asarray(positions)
+    # Get all cell centers as array
+    cell_centers = np.array([cell.center for cell in cells])  # shape: (n_cells, 2)
+    
+    # Build KD-tree: O(M × log(M))
+    tree = cKDTree(cell_centers)
+    
+    # Query all positions at once: O(N × log(M))
+    # Returns (distances, indices) where indices[i] is the index of the nearest cell for positions[i]
+    distances, nearest_indices = tree.query(positions)
     
     # Return list of nearest cells
     return [cells[idx] for idx in nearest_indices]
@@ -285,7 +326,7 @@ def point_in_polygon(point_x, point_y, polygon_points):
     
     return is_inside
 
-def triangle_to_follow(position, cell, edge_to_cells, adjacency_dict):
+def triangle_to_follow(position, cell, edge_to_cells):
     """
     Find the triangle to follow for a particle using barycentric coordinates.
     
@@ -308,8 +349,6 @@ def triangle_to_follow(position, cell, edge_to_cells, adjacency_dict):
         Current cell to check
     edge_to_cells : dict
         Dictionary mapping Edge objects to lists of cell objects
-    adjacency_dict : dict
-        Dictionary mapping cells to adjacent cells (unused but kept for compatibility)
         
     Returns
     -------
@@ -354,7 +393,7 @@ def triangle_to_follow(position, cell, edge_to_cells, adjacency_dict):
     # If no adjacent cell found (boundary edge), return current cell
     return cell
 
-def find_containing_cell(position, start_cell, edge_to_cells, adjacency_dict):
+def find_containing_cell(position, start_cell, edge_to_cells):
     """
     Iteratively follow triangles using triangle_to_follow until we find a cell where 
     cell.is_inside(position) is satisfied. This is guaranteed to find the correct cell
@@ -368,8 +407,6 @@ def find_containing_cell(position, start_cell, edge_to_cells, adjacency_dict):
         Initial cell to start the search from (typically the nearest centroid cell)
     edge_to_cells : dict
         Dictionary mapping Edge objects to lists of cell objects
-    adjacency_dict : dict
-        Dictionary mapping cells to adjacent cells (unused but kept for compatibility)
         
     Returns
     -------
@@ -384,7 +421,7 @@ def find_containing_cell(position, start_cell, edge_to_cells, adjacency_dict):
             return current_cell
         
         # Get the next cell to follow
-        next_cell = triangle_to_follow(position, current_cell, edge_to_cells, adjacency_dict)
+        next_cell = triangle_to_follow(position, current_cell, edge_to_cells)
         
         # If we're stuck (next_cell is the same as current_cell), we've reached a boundary
         # In this case, the point must be on the boundary, so return the current cell
@@ -462,7 +499,7 @@ def Arbitrary_Shape_Parameterized(N, fourier_coefficients, num_boundary_points, 
     Workflow:
     1. Create mesh from fourier coefficients
     2. Generate positions (area-weighted) and velocities
-    3. Create adjacency dictionary
+    3. Create cell list and edge-to-cells mapping
     4. Run algorithm (collide + update positions)
     5. Apply boundary condition
     6. Rebin particles that violate cell invariant
@@ -499,7 +536,7 @@ def Arbitrary_Shape_Parameterized(N, fourier_coefficients, num_boundary_points, 
     positions = hf.assign_positions_arbitrary_2d(N, mesh)
     velocities = hf.sample_velocities_from_maxwellian_2d(T_x0, T_y0, N)
     
-    cell_list, adjacency_dict, edge_to_cells = create_cell_list_and_adjacency_lists(mesh)
+    cell_list, edge_to_cells = create_cell_list_and_adjacency_lists(mesh)
 
     for position, velocity in zip(positions, velocities):
         for cell in cell_list:
@@ -584,16 +621,16 @@ def Arbitrary_Shape_Parameterized(N, fourier_coefficients, num_boundary_points, 
         
         # Now reassign the violating particles to their correct cells
         if len(particles_to_move) > 0:
-            # Extract all positions for vectorized nearest centroid lookup
+            # Extract all positions for nearest centroid lookup
             positions_to_rebin = np.array([position for _, _, position, _ in particles_to_move])
             
-            # Find nearest centroid cells for all particles at once (much faster)
-            nearest_cells = find_nearest_centroid_cell_vectorized(positions_to_rebin, cell_list)
+            # Find nearest centroid cells for all particles at once using KD-tree
+            nearest_cells = find_nearest_centroid_cell_kdtree(positions_to_rebin, cell_list)
             
             # Now iterate through and find containing cells using triangle following
             for (old_cell, _, position, velocity), nearest_cell in zip(particles_to_move, nearest_cells):
                 # Use triangle_to_follow to iteratively find the containing cell
-                containing_cell = find_containing_cell(position, nearest_cell, edge_to_cells, adjacency_dict)
+                containing_cell = find_containing_cell(position, nearest_cell, edge_to_cells)
                 
                 # Add particle to the containing cell
                 containing_cell.add_particle(position, velocity)

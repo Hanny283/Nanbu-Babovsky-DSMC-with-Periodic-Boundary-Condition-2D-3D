@@ -1,3 +1,6 @@
+from typing import Any
+
+
 class Edge:
     def __init__(self, p1, p2):
         # Convert to tuples for consistent hashing and comparison
