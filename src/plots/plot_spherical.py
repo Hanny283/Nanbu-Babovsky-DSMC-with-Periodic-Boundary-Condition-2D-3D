@@ -111,7 +111,10 @@ def main():
     ax6.grid(True)
 
     plt.tight_layout()
-    plt.show()
+    output_path1 = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'spherical_simulation.png')
+    plt.savefig(output_path1, dpi=300, bbox_inches='tight')
+    print(f"Saved spherical simulation plot to: {output_path1}")
+    plt.close()
 
     # Additional plots for speed distribution
     fig2, axes = plt.subplots(1, 2, figsize=(12, 5))
@@ -134,7 +137,10 @@ def main():
     axes[1].grid(True)
 
     plt.tight_layout()
-    plt.show()
+    output_path2 = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'spherical_speed_analysis.png')
+    plt.savefig(output_path2, dpi=300, bbox_inches='tight')
+    print(f"Saved spherical speed analysis plot to: {output_path2}")
+    plt.close()
 
 
 if __name__ == '__main__':

@@ -161,13 +161,6 @@ def find_nearest_centroid_cell_vectorized(positions, cells):
 def find_nearest_centroid_cell_kdtree(positions, cells):
     """
     Find the nearest centroid cell for multiple positions using KD-tree.
-    Faster than vectorized version for large meshes (thousands of cells).
-    
-    Time complexity: O(N × log(M)) for queries, O(M × log(M)) for building tree.
-    This is optimal for large meshes (M > ~1000 cells).
-    
-    For small meshes (M < ~500 cells), the vectorized version may be faster
-    due to lower overhead and NumPy optimizations.
     
     Parameters
     ----------
@@ -188,14 +181,12 @@ def find_nearest_centroid_cell_kdtree(positions, cells):
     # Get all cell centers as array
     cell_centers = np.array([cell.center for cell in cells])  # shape: (n_cells, 2)
     
-    # Build KD-tree: O(M × log(M))
     tree = cKDTree(cell_centers)
     
     # Query all positions at once: O(N × log(M))
     # Returns (distances, indices) where indices[i] is the index of the nearest cell for positions[i]
     distances, nearest_indices = tree.query(positions)
     
-    # Return list of nearest cells
     return [cells[idx] for idx in nearest_indices]
 
 def find_nearest_centroid_cell(position, cells):

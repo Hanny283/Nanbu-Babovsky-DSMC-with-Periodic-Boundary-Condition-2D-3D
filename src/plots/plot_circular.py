@@ -191,7 +191,10 @@ def main():
     ax4.grid(True)
 
     plt.tight_layout()
-    plt.show()
+    output_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'circular_simulation.png')
+    plt.savefig(output_path, dpi=300, bbox_inches='tight')
+    print(f"Saved circular simulation plot to: {output_path}")
+    plt.close()
 
 
 if __name__ == '__main__':
