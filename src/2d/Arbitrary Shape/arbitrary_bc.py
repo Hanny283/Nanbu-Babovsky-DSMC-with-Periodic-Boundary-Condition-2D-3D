@@ -1,3 +1,6 @@
+import numpy as np
+import arbitrary_helpers as hf
+
 def reflecting_BC_arbitrary_shape(velocities, positions, boundary_points):
     """
     Apply reflecting boundary condition for arbitrary 2D shape.

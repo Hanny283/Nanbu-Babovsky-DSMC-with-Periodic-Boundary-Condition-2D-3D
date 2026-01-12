@@ -2,15 +2,16 @@ import numpy as np
 import sys
 import os
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
-import helpers as hf
-import periodic_bc as pb
+import circular_helpers as hf
+import general_helpers as gh
+import universal_sim_helpers as uh
 import pygmsh
 import cell_class as ct
 
 def Circular_Boundary(N, R, positions, radius, T_x0, T_y0, dt, n_tot, e, mu, alpha, buckets_x, buckets_y):
 
     positions = hf.assign_positions_circular(N, R)
-    velocities = hf.sample_velocities_from_maxwellian_2d(T_x0, T_y0, N)
+    velocities = gh.sample_velocities_from_maxwellian_2d(T_x0, T_y0, N)
 
 
     #spatial discretization

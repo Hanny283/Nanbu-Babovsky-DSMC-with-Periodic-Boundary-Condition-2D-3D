@@ -4,7 +4,7 @@ from edge_class import Edge
 import cell_class as ct
 from scipy.spatial import cKDTree
 
-def create_arbitrary_shape_mesh_2d(N, points, mesh_size=0.1):
+def create_arbitrary_shape_mesh_2d(N,points, mesh_size=0.1):
     """
     Create an arbitrary shape in 2D using B-spline curves for smooth boundaries.
     

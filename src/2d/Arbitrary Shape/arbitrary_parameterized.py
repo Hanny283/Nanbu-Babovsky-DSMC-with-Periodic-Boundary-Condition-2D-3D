@@ -1,7 +1,9 @@
 import pygmsh 
 import arbitrary_helpers as hf
 import numpy as np
-import periodic_bc as pb
+import general_helpers as gh
+import universal_sim_helpers as uh
+import arbitrary_bc as bc
 import time
 import cell_class as ct
 import sys
@@ -57,7 +59,7 @@ def Arbitrary_Shape_Parameterized(N, fourier_coefficients, num_boundary_points, 
     mesh = hf.create_arbitrary_shape_mesh_2d(N, boundary_points, mesh_size=mesh_size)
     
     positions = hf.assign_positions_arbitrary_2d(N, mesh)
-    velocities = hf.sample_velocities_from_maxwellian_2d(T_x0, T_y0, N)
+    velocities = gh.sample_velocities_from_maxwellian_2d(T_x0, T_y0, N)
     
     cell_list, edge_to_cells = hf.create_cell_list_and_adjacency_lists(mesh)
 
@@ -114,7 +116,7 @@ def Arbitrary_Shape_Parameterized(N, fourier_coefficients, num_boundary_points, 
         
         for cell in cell_list:
             if len(cell.particle_positions) > 0:
-                cell.particle_velocities, cell.particle_positions = reflecting_BC_arbitrary_shape(
+                cell.particle_velocities, cell.particle_positions = bc.reflecting_BC_arbitrary_shape(
                     cell.particle_velocities, cell.particle_positions, boundary_points
                 )
                 # Track temperature (sum of squared velocities)
@@ -148,12 +150,12 @@ def Arbitrary_Shape_Parameterized(N, fourier_coefficients, num_boundary_points, 
             positions_to_rebin = np.array([position for _, _, position, _ in particles_to_move])
             
             # Find nearest centroid cells for all particles at once using KD-tree
-            nearest_cells = find_nearest_centroid_cell_kdtree(positions_to_rebin, cell_list)
+            nearest_cells = hf.find_nearest_centroid_cell_kdtree(positions_to_rebin, cell_list)
             
             # Now iterate through and find containing cells using triangle following
             for (old_cell, _, position, velocity), nearest_cell in zip(particles_to_move, nearest_cells):
                 # Use triangle_to_follow to iteratively find the containing cell
-                containing_cell = find_containing_cell(position, nearest_cell, edge_to_cells)
+                containing_cell = hf.find_containing_cell(position, nearest_cell, edge_to_cells)
                 
                 # Add particle to the containing cell
                 containing_cell.add_particle(position, velocity)

@@ -2,7 +2,9 @@ import numpy as np
 import sys
 import os
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
-import helpers as hf
+import spherical_helpers as hf
+import general_helpers as gh
+import universal_sim_helpers as uh
 import periodic_bc as pb
 
 # Optional pygmsh import - will create simple mesh if not available
